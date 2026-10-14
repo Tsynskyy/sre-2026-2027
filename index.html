@@ -32,7 +32,7 @@ async function api(path = "", method = "GET", body) {
     headers: {"Content-Type": "application/json"},
     body: body && JSON.stringify(body),
   });
-  if (!response.ok) throw new Error("Ошибка сервера: " + response.status);
+  if (!response.ok) throw new Error(response.status === 409 ? "Такая задача уже есть" : "Ошибка сервера: " + response.status);
   return response.status === 204 ? null : response.json();
 }
 
