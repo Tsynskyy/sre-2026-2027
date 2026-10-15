@@ -3,6 +3,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Literal
 
 import psycopg
 import uvicorn
@@ -17,7 +18,7 @@ INDEX = Path(__file__).with_name("index.html")
 logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("tasks")
 
-app = FastAPI(title="Задачи")
+app = FastAPI()
 
 
 @app.middleware("http")
@@ -35,7 +36,7 @@ async def log_request(request: Request, call_next):
 class TaskIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     title: str = Field(min_length=1, max_length=200)
-    done: bool = False
+    status: Literal["todo", "doing", "done"] = "todo"
 
 
 def query(sql, params=()):
@@ -65,7 +66,7 @@ def list_tasks():
 
 @app.post("/api/tasks", status_code=201)
 def create_task(task: TaskIn):
-    return one("INSERT INTO tasks (title, done) VALUES (%s, %s) RETURNING *", (task.title, task.done))
+    return one("INSERT INTO tasks (title, status) VALUES (%s, %s) RETURNING *", (task.title, task.status))
 
 
 @app.get("/api/tasks/{task_id}")
@@ -75,7 +76,7 @@ def get_task(task_id: int):
 
 @app.put("/api/tasks/{task_id}")
 def update_task(task_id: int, task: TaskIn):
-    return one("UPDATE tasks SET title = %s, done = %s WHERE id = %s RETURNING *", (task.title, task.done, task_id))
+    return one("UPDATE tasks SET title = %s, status = %s WHERE id = %s RETURNING *", (task.title, task.status, task_id))
 
 
 @app.delete("/api/tasks/{task_id}", status_code=204)

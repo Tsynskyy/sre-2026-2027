@@ -14,3 +14,16 @@ export DATABASE_URL=postgresql://tasks:tasks@127.0.0.1:5432/tasks
 Открыть http://127.0.0.1:8000
 
 Переменные окружения: `DATABASE_URL` обязательна, `HOST` по умолчанию `127.0.0.1`, `PORT` по умолчанию `8000`
+
+## Запуск в minikube
+
+```sh
+minikube start --driver=docker --container-runtime=docker
+eval $(minikube docker-env)
+docker build -t sre-tasks:1 .
+kubectl apply -f k8s/
+kubectl get pods
+minikube service app --url
+```
+
+Развертывание описано в [Отчет.md](Отчет.md)

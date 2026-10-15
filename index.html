@@ -6,26 +6,48 @@
 <link rel="icon" href="data:,">
 <title>Задачи</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 560px; margin: 48px auto; padding: 0 16px; color: #222; }
-  form { display: flex; gap: 8px; margin-bottom: 24px; }
-  input[type=text] { flex: 1; padding: 8px 10px; font: inherit; border: 1px solid #ccc; border-radius: 6px; }
-  button { padding: 6px 12px; font: inherit; border: 1px solid #ccc; border-radius: 6px; background: #f7f7f7; cursor: pointer; }
-  button:hover { background: #eee; }
-  ul { list-style: none; padding: 0; margin: 0; }
-  li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #eee; }
-  li span { flex: 1; overflow-wrap: anywhere; }
-  .done span { text-decoration: line-through; color: #999; }
-  .empty { color: #999; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 32px 16px 140px; background: #f2f0eb; font-family: system-ui, sans-serif; }
+  .board { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 32px 24px; background: #3f3f45; border: 14px solid #b8b9bb; box-shadow: 0 18px 40px rgba(0, 0, 0, .25); }
+  .col { min-height: 60vh; border-left: 2px solid #eee; transition: background .2s; }
+  .over { background: rgba(255, 255, 255, .08); }
+  .col:first-child { border-left: 0; }
+  h2 { margin: 0; padding: 14px 0 18px; border-bottom: 2px solid #eee; color: #fff; text-align: center; white-space: nowrap; font: 700 clamp(13px, 3vw, 34px) Impact, "Arial Narrow", sans-serif; }
+  .stickers { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; padding: 24px 12px; }
+  .sticker { position: relative; width: min(130px, 100%); aspect-ratio: 1; padding: 14px 12px; color: #1d2160; font: 17px/1.2 "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive; overflow-wrap: anywhere; cursor: grab; transform: rotate(var(--r)); box-shadow: 2px 5px 8px rgba(0, 0, 0, .35); transition: transform .15s, box-shadow .15s, opacity .15s; }
+  .sticker:hover { z-index: 1; transform: translateY(-4px) rotate(0deg) scale(1.05); box-shadow: 4px 12px 16px rgba(0, 0, 0, .4); }
+  .dragging { opacity: .4; }
+  .sticker p { margin: 0; }
+  .c0 { background: #36d7f3; } .c1 { background: #f8b23f; } .c2 { background: #e76464; } .c3 { background: #8dc63f; }
+  .sticker button { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: rgba(0, 0, 0, .12); color: inherit; font: 16px/24px system-ui; cursor: pointer; }
+  .new { animation: stick .45s ease-out; }
+  .torn { z-index: 1; pointer-events: none; transform-origin: 10% 0; animation: tear .8s ease-in forwards; }
+  @keyframes stick { from { opacity: 0; transform: scale(1.3) rotate(var(--r)); } }
+  @keyframes tear { 25% { transform: rotate(calc(var(--r) + 14deg)); } to { opacity: 0; transform: translateY(60vh) rotate(calc(var(--r) + 50deg)); } }
+  form { position: fixed; left: 50%; bottom: 24px; width: min(420px, calc(100% - 32px)); display: flex; flex-wrap: wrap; gap: 8px; padding: 14px; background: #fffdf7; border-radius: 14px; box-shadow: 0 12px 32px rgba(0, 0, 0, .3); transform: translateX(-50%); animation: float 4s ease-in-out infinite; }
+  @keyframes float { 50% { transform: translate(-50%, -5px); } }
+  input, form button { padding: 8px 10px; font: inherit; border: 1px solid #ccc; border-radius: 8px; }
+  input { flex: 1; }
+  form button { background: #f8b23f; cursor: pointer; }
+  #error { flex-basis: 100%; margin: 0; color: #c62828; font-size: 14px; }
+  #error:empty { display: none; }
 </style>
 </head>
 <body>
-<h1>Задачи</h1>
+<main class="board">
+  <section class="col" data-status="todo"><h2>TO DO</h2><div class="stickers"></div></section>
+  <section class="col" data-status="doing"><h2>IN PROGRESS</h2><div class="stickers"></div></section>
+  <section class="col" data-status="done"><h2>DONE</h2><div class="stickers"></div></section>
+</main>
 <form id="form">
-  <input id="title" type="text" required maxlength="200" placeholder="Новая задача" autocomplete="off">
+  <input id="title" required maxlength="200" placeholder="Что сделать" autocomplete="off">
   <button>Добавить</button>
+  <p id="error"></p>
 </form>
-<ul id="list"></ul>
 <script>
+let dragged;
+const error = document.getElementById("error");
+
 async function api(path = "", method = "GET", body) {
   const response = await fetch("/api/tasks" + path, {
     method,
@@ -33,55 +55,70 @@ async function api(path = "", method = "GET", body) {
     body: body && JSON.stringify(body),
   });
   if (!response.ok) throw new Error(response.status === 409 ? "Такая задача уже есть" : "Ошибка сервера: " + response.status);
+  error.textContent = "";
   return response.status === 204 ? null : response.json();
 }
 
-function element(tag, text = "", className = "") {
-  const node = document.createElement(tag);
-  node.textContent = text;
-  node.className = className;
-  return node;
+function place(node, task) {
+  document.querySelector(`[data-status=${task.status}] .stickers`).append(node);
 }
 
-function button(text, onclick) {
-  const node = element("button", text);
-  node.onclick = onclick;
+function sticker(task) {
+  const node = document.createElement("div");
+  node.className = "sticker c" + task.id % 4;
+  node.style.setProperty("--r", task.id * 37 % 9 - 4 + "deg");
+  const text = document.createElement("p");
+  text.textContent = task.title;
+  node.draggable = true;
+  node.ondragstart = event => {
+    event.dataTransfer.setData("text/plain", "");
+    node.classList.add("dragging");
+    dragged = async status => {
+      if (status === task.status) return;
+      task = await api("/" + task.id, "PUT", {title: task.title, status});
+      place(node, task);
+      node.classList.remove("new");
+      void node.offsetWidth;
+      node.classList.add("new");
+    };
+  };
+  node.ondragend = () => node.classList.remove("dragging");
+  const close = document.createElement("button");
+  close.textContent = "×";
+  close.onclick = async () => {
+    await api("/" + task.id, "DELETE");
+    node.addEventListener("animationend", () => node.remove());
+    node.classList.replace("new", "torn") || node.classList.add("torn");
+  };
+  node.append(text, close);
   return node;
-}
-
-async function render() {
-  const tasks = await api();
-  const items = tasks.map(task => {
-    const item = element("li", "", task.done ? "done" : "");
-    const box = element("input");
-    box.type = "checkbox";
-    box.checked = task.done;
-    box.onchange = () => api("/" + task.id, "PUT", {title: task.title, done: box.checked}).then(render);
-    const edit = button("Изменить", async () => {
-      const title = prompt("Название", task.title)?.trim();
-      if (title) await api("/" + task.id, "PUT", {title, done: task.done});
-      await render();
-    });
-    const remove = button("Удалить", () => api("/" + task.id, "DELETE").then(render));
-    item.append(box, element("span", task.title), edit, remove);
-    return item;
-  });
-  if (!items.length) items.push(element("li", "Задач пока нет", "empty"));
-  document.getElementById("list").replaceChildren(...items);
 }
 
 document.getElementById("form").onsubmit = async event => {
   event.preventDefault();
   const input = document.getElementById("title");
-  const title = input.value.trim();
-  if (!title) return;
-  await api("", "POST", {title});
+  const task = await api("", "POST", {title: input.value.trim()});
+  const node = sticker(task);
+  node.classList.add("new");
+  place(node, task);
   input.value = "";
-  await render();
 };
 
-window.onunhandledrejection = event => alert(event.reason.message);
-render();
+document.querySelectorAll(".col").forEach(col => {
+  col.ondragover = event => {
+    event.preventDefault();
+    col.classList.add("over");
+  };
+  col.ondragleave = event => col.contains(event.relatedTarget) || col.classList.remove("over");
+  col.ondrop = event => {
+    event.preventDefault();
+    col.classList.remove("over");
+    dragged?.(col.dataset.status);
+  };
+});
+
+window.onunhandledrejection = event => { error.textContent = event.reason.message; };
+api().then(tasks => tasks.forEach(task => place(sticker(task), task)));
 </script>
 </body>
 </html>
