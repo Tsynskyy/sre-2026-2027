@@ -1,0 +1,45 @@
+server:
+  datasource:
+    url: http://vm-victoria-metrics-single-server.monitoring.svc:8428
+  config:
+    alerts:
+      groups:
+        - name: tasks
+          rules:
+            - alert: TasksApiErrorRateHigh
+              expr: |
+                sum(rate(http_request_duration_seconds_count{route=~"/api/.*",status=~"5.."}[2m]))
+                / sum(rate(http_request_duration_seconds_count{route=~"/api/.*"}[2m])) > 0.05
+              for: 1m
+              labels:
+                severity: critical
+              annotations:
+                summary: "Доля 5xx на /api/*: {{ $value | humanizePercentage }}"
+            - alert: TasksApiLatencyHigh
+              expr: |
+                1 - sum(rate(http_request_duration_seconds_bucket{route=~"/api/.*",le="0.25"}[5m]))
+                / sum(rate(http_request_duration_seconds_count{route=~"/api/.*"}[5m])) > 0.1
+              for: 2m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Доля запросов /api/* дольше 250 мс: {{ $value | humanizePercentage }}"
+            - alert: TasksAppHighCpu
+              expr: rate(process_cpu_seconds_total{app="app"}[2m]) > 0.175
+              for: 2m
+              labels:
+                severity: warning
+              annotations:
+                summary: "CPU пода {{ $labels.pod }}: {{ $value | printf \"%.2f\" }} ядра при лимите 0.25"
+
+alertmanager:
+  enabled: true
+  config:
+    route:
+      receiver: webhook
+      group_by: ["alertname"]
+    receivers:
+      - name: webhook
+        webhook_configs:
+          - url: http://alert-receiver.monitoring.svc:8080
+            send_resolved: true
