@@ -34,4 +34,17 @@ kubectl port-forward svc/victoria-logs 9428:9428
 
 Открыть http://127.0.0.1:9428/select/vmui/
 
+## Метрики в VictoriaMetrics
+
+Приложение отдает метрики на порту `9100` (`METRICS_PORT`), путь `/metrics`
+PostgreSQL - через `postgres-exporter` на `9187`
+
+```sh
+helm repo add vm https://victoriametrics.github.io/helm-charts/
+helm install vm vm/victoria-metrics-single -n monitoring --create-namespace -f k8s/monitoring/vm-values.yaml
+kubectl port-forward svc/vm-victoria-metrics-single-server -n monitoring 8428:8428
+```
+
+Открыть http://127.0.0.1:8428/vmui/
+
 Развертывание описано в [Отчет.md](Отчет.md)

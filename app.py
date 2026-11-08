@@ -11,6 +11,7 @@ import psycopg
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
+from prometheus_client import Counter, Histogram, start_http_server
 from psycopg.rows import dict_row
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,6 +41,12 @@ log = logging.getLogger("tasks")
 
 app = FastAPI()
 
+LATENCY = Histogram("http_request_duration_seconds", "Время обработки HTTP-запроса", ["route", "status"])
+CREATED = Counter("tasks_created_total", "Созданные задачи")
+COMPLETED = Counter("tasks_completed_total", "Задачи, переведенные в статус done")
+DELETED = Counter("tasks_deleted_total", "Удаленные задачи")
+DUPLICATES = Counter("tasks_duplicates_rejected_total", "Отклоненные дубликаты задач")
+
 
 def log_access(request, status, start, exc_info=False):
     level = logging.ERROR if status >= 500 else logging.WARNING if status >= 400 else logging.INFO
@@ -50,6 +57,8 @@ def log_access(request, status, start, exc_info=False):
         "duration_ms": round((time.perf_counter() - start) * 1000),
     }
     log.log(level, "%s %s %s", request.method, request.url.path, status, exc_info=exc_info, extra={"fields": fields})
+    route = getattr(request.scope.get("route"), "path", "other")
+    LATENCY.labels(route, status).observe(time.perf_counter() - start)
 
 
 @app.middleware("http")
@@ -79,6 +88,7 @@ def one(sql, params):
     try:
         rows = query(sql, params)
     except psycopg.errors.UniqueViolation:
+        DUPLICATES.inc()
         raise HTTPException(409, "Такая задача уже есть")
     if not rows:
         raise HTTPException(404, "Задача не найдена")
@@ -97,7 +107,9 @@ def list_tasks():
 
 @app.post("/api/tasks", status_code=201)
 def create_task(task: TaskIn):
-    return one("INSERT INTO tasks (title, status) VALUES (%s, %s) RETURNING *", (task.title, task.status))
+    row = one("INSERT INTO tasks (title, status) VALUES (%s, %s) RETURNING *", (task.title, task.status))
+    CREATED.inc()
+    return row
 
 
 @app.get("/api/tasks/{task_id}")
@@ -107,13 +119,22 @@ def get_task(task_id: int):
 
 @app.put("/api/tasks/{task_id}")
 def update_task(task_id: int, task: TaskIn):
-    return one("UPDATE tasks SET title = %s, status = %s WHERE id = %s RETURNING *", (task.title, task.status, task_id))
+    row = one(
+        "UPDATE tasks t SET title = %s, status = %s FROM tasks old WHERE t.id = old.id AND t.id = %s"
+        " RETURNING t.*, old.status AS old_status",
+        (task.title, task.status, task_id),
+    )
+    if row.pop("old_status") != "done" and row["status"] == "done":
+        COMPLETED.inc()
+    return row
 
 
 @app.delete("/api/tasks/{task_id}", status_code=204)
 def delete_task(task_id: int):
     one("DELETE FROM tasks WHERE id = %s RETURNING id", (task_id,))
+    DELETED.inc()
 
 
 if __name__ == "__main__":
+    start_http_server(int(os.environ.get("METRICS_PORT", "9100")), addr=os.environ.get("HOST", "127.0.0.1"))
     uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "8000")), log_config=None, access_log=False)
