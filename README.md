@@ -47,4 +47,10 @@ kubectl port-forward svc/vm-victoria-metrics-single-server -n monitoring 8428:84
 
 Открыть http://127.0.0.1:8428/vmui/
 
+## Пробер
+
+`prober.py` - Deployment `prober` из `k8s/prober.yaml`
+Каждые 10 секунд создает, закрывает и удаляет задачу через `PROBE_TARGET`
+метрика `probe_total` на порту `9100`
+
 Развертывание описано в [Отчет.md](Отчет.md)
