@@ -1,0 +1,123 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vector
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vector
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vector
+subjects:
+  - kind: ServiceAccount
+    name: vector
+    namespace: default
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector
+data:
+  vector.yaml: |
+    data_dir: /var/lib/vector
+    sources:
+      app:
+        type: kubernetes_logs
+        extra_label_selector: app=app
+    transforms:
+      parse:
+        type: remap
+        inputs: [app]
+        source: |
+          pod = .kubernetes.pod_name
+          node = .kubernetes.pod_node_name
+          parsed, err = parse_json(.message)
+          if err == null && is_object(parsed) {
+            . = object!(parsed)
+          } else {
+            . = {"message": .message, "timestamp": .timestamp, "level": "unknown", "service.name": "tasks"}
+          }
+          ."k8s.pod" = pod
+          ."k8s.node" = node
+    sinks:
+      vlogs:
+        type: elasticsearch
+        inputs: [parse]
+        endpoints: [http://victoria-logs:9428/insert/elasticsearch/]
+        api_version: v8
+        compression: gzip
+        healthcheck:
+          enabled: false
+        query:
+          _msg_field: message
+          _time_field: timestamp
+          _stream_fields: service.name,k8s.pod
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: vector
+spec:
+  selector:
+    matchLabels:
+      app: vector
+  template:
+    metadata:
+      labels:
+        app: vector
+    spec:
+      serviceAccountName: vector
+      containers:
+        - name: vector
+          image: timberio/vector:0.59.0-distroless-libc
+          args: ["--config", "/etc/vector/vector.yaml"]
+          env:
+            - name: VECTOR_SELF_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vector
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/vector
+            - name: var-log
+              mountPath: /var/log
+              readOnly: true
+            - name: docker-containers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: vector
+        - name: data
+          hostPath:
+            path: /var/lib/vector
+            type: DirectoryOrCreate
+        - name: var-log
+          hostPath:
+            path: /var/log
+        - name: docker-containers
+          hostPath:
+            path: /var/lib/docker/containers

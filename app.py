@@ -1,7 +1,9 @@
+import json
 import logging
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -15,10 +17,39 @@ from pydantic import BaseModel, ConfigDict, Field
 DATABASE_URL = os.environ["DATABASE_URL"]
 INDEX = Path(__file__).with_name("index.html")
 
-logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        entry = {
+            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(timespec="milliseconds"),
+            "level": record.levelname.lower(),
+            "message": record.getMessage(),
+            "service.name": "tasks",
+            "logger": record.name,
+            **getattr(record, "fields", {}),
+        }
+        if record.exc_info:
+            entry["error"] = self.formatException(record.exc_info)
+        return json.dumps(entry, ensure_ascii=False)
+
+
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(JsonFormatter())
+logging.basicConfig(level=logging.INFO, handlers=[handler])
 log = logging.getLogger("tasks")
 
 app = FastAPI()
+
+
+def log_access(request, status, start, exc_info=False):
+    level = logging.ERROR if status >= 500 else logging.WARNING if status >= 400 else logging.INFO
+    fields = {
+        "http.method": request.method,
+        "url.path": request.url.path,
+        "http.status_code": status,
+        "duration_ms": round((time.perf_counter() - start) * 1000),
+    }
+    log.log(level, "%s %s %s", request.method, request.url.path, status, exc_info=exc_info, extra={"fields": fields})
 
 
 @app.middleware("http")
@@ -27,9 +58,9 @@ async def log_request(request: Request, call_next):
     try:
         response = await call_next(request)
     except Exception:
-        log.exception("%s %s 500 %.0f ms", request.method, request.url.path, (time.perf_counter() - start) * 1000)
+        log_access(request, 500, start, exc_info=True)
         raise
-    log.info("%s %s %s %.0f ms", request.method, request.url.path, response.status_code, (time.perf_counter() - start) * 1000)
+    log_access(request, response.status_code, start)
     return response
 
 

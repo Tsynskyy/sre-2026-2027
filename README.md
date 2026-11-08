@@ -26,4 +26,12 @@ kubectl get pods
 minikube service app --url
 ```
 
+## Логи в VictoriaLogs
+
+```sh
+kubectl port-forward svc/victoria-logs 9428:9428
+```
+
+Открыть http://127.0.0.1:9428/select/vmui/
+
 Развертывание описано в [Отчет.md](Отчет.md)
