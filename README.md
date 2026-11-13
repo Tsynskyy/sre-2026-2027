@@ -65,4 +65,14 @@ kubectl port-forward -n monitoring svc/alert-receiver 8080:8080
 алерты http://127.0.0.1:8880/vmalert/alerts
 уведомления http://127.0.0.1:8080
 
+## Grafana
+
+```sh
+helm repo add grafana-community https://grafana-community.github.io/helm-charts
+helm install grafana grafana-community/grafana -n monitoring -f k8s/monitoring/grafana-values.yaml --set-file dashboards.default.tasks.json=k8s/monitoring/grafana/tasks-dashboard.json
+kubectl port-forward svc/grafana 3000:80 -n monitoring
+```
+
+http://127.0.0.1:3000, `admin` / `admin`: дашборд `Tasks: приложение, рантайм, SLA` и импортированный `PostgreSQL Database` (ID 9628)
+
 Развертывание описано в [Отчет.md](Отчет.md)
