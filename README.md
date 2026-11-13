@@ -53,4 +53,16 @@ kubectl port-forward svc/vm-victoria-metrics-single-server -n monitoring 8428:84
 Каждые 10 секунд создает, закрывает и удаляет задачу через `PROBE_TARGET`
 метрика `probe_total` на порту `9100`
 
+## Алерты
+
+```sh
+kubectl apply -f k8s/monitoring/alert-receiver.yaml
+helm install va vm/victoria-metrics-alert -n monitoring -f k8s/monitoring/vmalert-values.yaml
+kubectl port-forward -n monitoring svc/va-victoria-metrics-alert-server 8880:8880
+kubectl port-forward -n monitoring svc/alert-receiver 8080:8080
+```
+
+алерты http://127.0.0.1:8880/vmalert/alerts
+уведомления http://127.0.0.1:8080
+
 Развертывание описано в [Отчет.md](Отчет.md)
